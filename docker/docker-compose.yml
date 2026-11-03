@@ -1,0 +1,18 @@
+# any2wechat 单独部署形态（与 TrendRadar 同栈部署见 presets/trendradar/）
+# 首次使用：
+#   1) docker compose -f docker/docker-compose.yml run --rm any2wechat node bin/login.mjs
+#      → 终端出授权链接 → 手机微信内打开确认
+#   2) docker compose -f docker/docker-compose.yml up -d
+#   3) 微信里给 bot 发一句"绑定" → docker compose logs 查看绑定确认
+services:
+  any2wechat:
+    build: { context: .., dockerfile: docker/Dockerfile }
+    container_name: any2wechat
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8788:8788"   # 只映射到宿主机回环，不向局域网/公网暴露
+    environment:
+      BRIDGE_HOST: 0.0.0.0      # 容器内监听全部网卡；宿主机侧仍只有回环可达
+      # BRIDGE_TOKEN: change-me  # 跨机调用时开启共享密钥鉴权
+    volumes:
+      - ./data:/app/data        # 凭证/会话持久化（含微信账号凭证，注意目录权限）

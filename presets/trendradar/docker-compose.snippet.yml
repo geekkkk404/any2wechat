@@ -1,0 +1,25 @@
+# TrendRadar 栈接入 any2wechat 的 compose 片段（并入你现有的 docker-compose.yml）
+# 前提：TrendRadar 已在某个 compose network 里；下方网络名按实际替换
+services:
+  any2wechat:
+    build: ./any2wechat          # git clone 本仓库到 compose 文件同级目录；或改用 image:（发布后提供）
+    container_name: any2wechat
+    restart: unless-stopped
+    environment:
+      BRIDGE_HOST: 0.0.0.0       # 容器内须监听全部网卡，供 TrendRadar 容器经 compose 网络访问
+    volumes:
+      - ./any2wechat-data:/app/data   # 凭证/会话持久化（含微信账号凭证，注意目录权限）
+    networks:
+      - trendradar-net
+
+  # ↓↓↓ 在你已有的 trendradar 服务上追加（不要重复定义服务本身）↓↓↓
+  # trendradar:
+  #   environment:
+  #     GENERIC_WEBHOOK_URL: http://any2wechat:8788/webhook
+  #     GENERIC_WEBHOOK_TEMPLATE: '{"title":"{title}","content":"{content}"}'
+  #   networks:
+  #     - trendradar-net
+
+networks:
+  trendradar-net:
+    external: true   # 或改成与现有栈一致的网络定义
