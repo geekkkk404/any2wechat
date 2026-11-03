@@ -1,0 +1,12 @@
+docker restart any2wechat
+sleep 4
+echo "== /health（宿主机回环）"
+curl -s -m 10 http://127.0.0.1:8788/health
+echo
+echo "== webhook 真实推送（VPS 容器 → iLink → 微信）"
+curl -s -m 20 -X POST http://127.0.0.1:8788/webhook -H "Content-Type: application/json" -d '{"title":"any2wechat N-05 Docker 验收","content":"这条消息来自测试 VPS 上的 any2wechat 容器：镜像构建 → compose 编排 → 数据卷挂载 → iLink 发送，全链路在大陆 VPS 跑通。"}'
+echo
+sleep 4
+echo "== 容器日志尾行"
+docker logs any2wechat 2>&1 | tail -6
+echo N05-RUN-DONE
