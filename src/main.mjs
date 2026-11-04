@@ -1,11 +1,13 @@
 // main.mjs — any2wechat 守护进程入口：单进程双任务
-//   ① listen 长轮询（抓绑定令牌 + 在线保活）  ② webhook server（读会话发送）
+//   ① listen 长轮询（抓绑定令牌 + 在线保活 + 扫码者消息转发）  ② webhook server（读会话发送）
 // 环境变量：BRIDGE_PORT（默认 8788）、BRIDGE_HOST（默认 127.0.0.1）、BRIDGE_TOKEN（可选鉴权）、
-//           BRIDGE_DATA_DIR（默认 <仓库>/data）——详见 docs/webhook-api.md
+//           BRIDGE_DATA_DIR（默认 <仓库>/data）、BRIDGE_RELAY_URL/BRIDGE_RELAY_TOKEN（可选，
+//           入站转发：把扫码者消息 POST 给宿主回调）——详见 docs/webhook-api.md
 import { notifyStart, sendMessage } from "./ilink.mjs";
 import { loadCredentials } from "./store.mjs";
 import { startListen } from "./listen.mjs";
 import { startServer } from "./server.mjs";
+import { createRelay } from "./relay.mjs";
 
 const log = console;
 
@@ -29,10 +31,14 @@ try {
   log.error(`notifystart 失败（忽略，继续启动）: ${err.message}`);
 }
 
-// 任务①：长轮询。首次绑定（未绑定 → 已绑定跃迁）时自动回发确认
+// 任务①：长轮询。首次绑定（未绑定 → 已绑定跃迁）时自动回发确认；扫码者消息经 relay 转发
+const relay = createRelay({ log });
+if (relay.enabled) log.log("入站转发已启用（BRIDGE_RELAY_URL 已配置；只转发扫码者本人消息）");
+
 startListen({
   state,
   log,
+  onMessage: (m) => relay.post(m),
   onBound: async (session) => {
     try {
       await sendMessage(

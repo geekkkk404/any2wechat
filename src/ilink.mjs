@@ -6,7 +6,7 @@ export const FIXED_BASE_URL = "https://ilinkai.weixin.qq.com";
 // 官方插件 2.4.8 的版本编码值（0x00MMNNPP → 十进制），服务端已验证接受
 export const CHANNEL_VERSION = "2.4.8";
 export const CLIENT_VERSION = "132104";
-export const BOT_AGENT = "any2wechat/0.1.0";
+export const BOT_AGENT = "any2wechat/0.2.0";
 
 export function buildBaseInfo() {
   return { channel_version: CHANNEL_VERSION, bot_agent: BOT_AGENT };
