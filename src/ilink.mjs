@@ -286,7 +286,10 @@ export async function sendQrContent(creds, toUserId, contextToken, content, log 
   const downloadParam = await uploadToCdn({ buf: png, uploadFullUrl, uploadParam, filekey, aeskey });
   await sendImageMessage(creds, toUserId, contextToken, {
     downloadParam,
-    aeskeyB64: aeskey.toString("base64"),
+    // vendor 语义（send.ts:297 Buffer.from(uploaded.aeskey)）：aeskey 先 hex 字符串化再整体
+    // base64——微信端按「base64 → hex 文本 → hex 解码」还原 16 字节密钥；直接 base64(原始字节)
+    // 会得到 24 字符短串，客户端解不出密钥 → 图片静默丢弃（服务端仍 ret=0，实测踩中）
+    aeskeyB64: Buffer.from(aeskey.toString("hex")).toString("base64"),
     ciphertextSize: aesEcbPaddedSize(png.length),
   });
   log.log(`  QR 图片已发送 (${png.length} 字节 PNG, 内容 ${content.length} 字符)`);
