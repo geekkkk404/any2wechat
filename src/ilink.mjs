@@ -3,9 +3,12 @@
 import crypto from "node:crypto";
 
 export const FIXED_BASE_URL = "https://ilinkai.weixin.qq.com";
-// 官方插件 2.4.8 的版本编码值（0x00MMNNPP → 十进制），服务端已验证接受
-export const CHANNEL_VERSION = "2.4.8";
-export const CLIENT_VERSION = "132104";
+// 跟随官方插件版本（vendor package.json 实测 2.4.10）：**图片消息是新版客户端能力，
+// 服务端按 channel_version/ClientVersion gate**——2.4.8(132104) 发图 ret=0 但静默不投递
+// （E2E 实测踩中），升 2.4.10(132106) 后 vendor 本体同凭证发图成功（对照实验实锤）
+export const CHANNEL_VERSION = "2.4.10";
+// 0x00MMNNPP：major<<16 | minor<<8 | patch → 2.4.10 = 132106
+export const CLIENT_VERSION = "132106";
 export const BOT_AGENT = "any2wechat/0.4.0";
 // 微信 CDN（图片等媒体上传），vendor config-schema 默认值
 export const CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
