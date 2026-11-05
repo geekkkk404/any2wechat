@@ -1,12 +1,27 @@
 // server.mjs — webhook 服务：POST /webhook {title?, content?|text} → 分批 → 微信；GET /health
 // 完整契约见 docs/webhook-api.md。批 1800 字符（保守值）、批间隔 1.2s、串行发送（防风控）
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 import { sendMessage } from "./ilink.mjs";
-import { hasSession, loadCredentials, loadSession } from "./store.mjs";
+import { DATA_DIR, hasSession, loadCredentials, loadSession } from "./store.mjs";
 
 const BATCH_CHARS = 1800; // 微信文本批大小（保守值，实测后调）
 const BATCH_GAP_MS = 1200; // 批间隔，防风控
 const MAX_BODY_BYTES = 2_000_000; // 请求体上限
+
+// 推送尾注（通用能力，N-08）：BRIDGE_FOOTER_TEXT 可选；BRIDGE_FOOTER_ONCE_PER_DAY=1 时
+// 每日仅首推带（本地日期判定）。状态存 data/footer-state.json，发送成功才记账——失败不吞明天的名额。
+const FOOTER = (process.env.BRIDGE_FOOTER_TEXT || "").trim();
+const FOOTER_ONCE_PER_DAY = String(process.env.BRIDGE_FOOTER_ONCE_PER_DAY || "") === "1";
+const FOOTER_SEP = "\n\n──────────────\n";
+const FOOTER_STATE_FILE = path.join(DATA_DIR, "footer-state.json");
+
+function localDate() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 // 按换行边界切分长文本
 function splitBatches(text, max = BATCH_CHARS) {
@@ -86,6 +101,26 @@ export function startServer({
           res.writeHead(400).end(JSON.stringify({ ok: false, error: "empty body" }));
           return;
         }
+        // 推送尾注
+        let footerPending = false;
+        let fullOut = full;
+        if (FOOTER && full.trim()) {
+          if (!FOOTER_ONCE_PER_DAY) {
+            fullOut = full + FOOTER_SEP + FOOTER;
+          } else {
+            const today = localDate();
+            let lastDate = "";
+            try {
+              lastDate = JSON.parse(fs.readFileSync(FOOTER_STATE_FILE, "utf-8")).lastDate || "";
+            } catch {
+              lastDate = ""; // 无状态文件 = 今日未发
+            }
+            if (lastDate !== today) {
+              footerPending = true;
+              fullOut = full + FOOTER_SEP + FOOTER;
+            }
+          }
+        }
         let session;
         try {
           session = loadSession();
@@ -93,10 +128,10 @@ export function startServer({
           res.writeHead(409).end(JSON.stringify({ ok: false, error: err.message }));
           return;
         }
-        const batches = splitBatches(full);
+        const batches = splitBatches(fullOut);
         const seqTag = batches.length > 1;
         stats.received++;
-        log.log(`\n[${new Date().toISOString()}] 收到推送 ${full.length} 字符 → ${batches.length} 批`);
+        log.log(`\n[${new Date().toISOString()}] 收到推送 ${fullOut.length} 字符 → ${batches.length} 批`);
 
         sending = sending.then(async () => {
           for (let i = 0; i < batches.length; i++) {
@@ -107,6 +142,12 @@ export function startServer({
               await sendMessage(creds, s.to_user_id, text, s.context_token);
               stats.batches++;
               stats.lastAt = new Date().toISOString();
+              if (footerPending && i === 0) {
+                footerPending = false; // 首批发送成功才记账，失败不吞明天的名额
+                try {
+                  fs.writeFileSync(FOOTER_STATE_FILE, JSON.stringify({ lastDate: localDate() }));
+                } catch { /* 状态写失败 = 明天可能重复带一次，无害 */ }
+              }
               log.log(`  批 ${i + 1}/${batches.length} ✅ (${text.length} 字符)`);
             } catch (err) {
               stats.failed++;

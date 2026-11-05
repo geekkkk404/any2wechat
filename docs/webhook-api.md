@@ -81,6 +81,8 @@ Authorization: Bearer <BRIDGE_RELAY_TOKEN>   // 仅在设置该变量时携带
 | `BRIDGE_DATA_DIR` | `<仓库>/data` | 凭证/会话数据目录（Docker volume 挂载点） |
 | `BRIDGE_RELAY_URL` | （关闭） | 设置后启用入站转发（见上文） |
 | `BRIDGE_RELAY_TOKEN` | （关闭） | 入站转发的 Bearer 共享密钥 |
+| `BRIDGE_FOOTER_TEXT` | （关闭） | 推送尾注：每条推送末尾追加的固定文案（通用能力，与宿主项目语义无关） |
+| `BRIDGE_FOOTER_ONCE_PER_DAY` | （关闭） | 设 `1` 时尾注每日仅随首推送达（本地日期；发送成功才记账） |
 
 ## 安全模型
 
