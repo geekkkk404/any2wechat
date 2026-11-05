@@ -1,12 +1,13 @@
-// server.mjs — webhook 服务：POST /webhook {title?, content?|text} → 分批 → 微信；GET /health
-// 完整契约见 docs/webhook-api.md。批 1800 字符（保守值）、批间隔 1.2s、串行发送（防风控）
+// server.mjs — webhook 服务：POST /webhook {title?, content?|text, qr_content?} → 分批 → 微信；GET /health
+// 完整契约见 docs/webhook-api.md。批字符数默认 1800（保守值，实测后调），BRIDGE_BATCH_CHARS 可调；
+// 批间隔 1.2s、串行发送（防风控）。qr_content（P-53）：非空则发完文本后追加一张二维码图片消息。
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { sendMessage } from "./ilink.mjs";
+import { sendMessage, sendQrContent } from "./ilink.mjs";
 import { DATA_DIR, hasSession, loadCredentials, loadSession } from "./store.mjs";
 
-const BATCH_CHARS = 1800; // 微信文本批大小（保守值，实测后调）
+const BATCH_CHARS = Math.max(500, Math.min(4500, Number(process.env.BRIDGE_BATCH_CHARS || 1800)));
 const BATCH_GAP_MS = 1200; // 批间隔，防风控
 const MAX_BODY_BYTES = 2_000_000; // 请求体上限
 
@@ -87,17 +88,18 @@ export function startServer({
         if (body.length > MAX_BODY_BYTES) req.destroy(); // 上限保护
       });
       req.on("end", () => {
-        let title = "", content = "";
+        let title = "", content = "", qrContent = "";
         try {
           const j = JSON.parse(body);
           title = String(j.title ?? "");
           content = String(j.content ?? j.text ?? "");
+          qrContent = String(j.qr_content ?? "").trim();
         } catch {
           // 兼容纯文本 body
           content = body;
         }
         const full = title ? `${title}\n\n${content}` : content;
-        if (!full.trim()) {
+        if (!full.trim() && !qrContent) {
           res.writeHead(400).end(JSON.stringify({ ok: false, error: "empty body" }));
           return;
         }
@@ -128,10 +130,10 @@ export function startServer({
           res.writeHead(409).end(JSON.stringify({ ok: false, error: err.message }));
           return;
         }
-        const batches = splitBatches(fullOut);
+        const batches = fullOut.trim() ? splitBatches(fullOut) : [];
         const seqTag = batches.length > 1;
         stats.received++;
-        log.log(`\n[${new Date().toISOString()}] 收到推送 ${fullOut.length} 字符 → ${batches.length} 批`);
+        log.log(`\n[${new Date().toISOString()}] 收到推送 ${fullOut.length} 字符 → ${batches.length} 批${qrContent ? ` + QR(${qrContent.length}字符)` : ""}`);
 
         sending = sending.then(async () => {
           for (let i = 0; i < batches.length; i++) {
@@ -152,12 +154,24 @@ export function startServer({
             } catch (err) {
               stats.failed++;
               log.error(`  批 ${i + 1}/${batches.length} ❌ ${err.message}`);
-              break;
+              return; // 文本断链时不再补发 QR（顺序语境已乱）
             }
             if (i < batches.length - 1) await new Promise((r) => setTimeout(r, BATCH_GAP_MS));
           }
+          if (qrContent) {
+            await new Promise((r) => setTimeout(r, BATCH_GAP_MS));
+            try {
+              const s = loadSession();
+              await sendQrContent(creds, s.to_user_id, s.context_token, qrContent, log);
+              stats.batches++;
+              stats.lastAt = new Date().toISOString();
+            } catch (err) {
+              stats.failed++;
+              log.error(`  QR 图片 ❌ ${err.message}`);
+            }
+          }
         });
-        res.writeHead(202).end(JSON.stringify({ ok: true, batches: batches.length }));
+        res.writeHead(202).end(JSON.stringify({ ok: true, batches: batches.length, qr: Boolean(qrContent) }));
         return;
       });
       return;
