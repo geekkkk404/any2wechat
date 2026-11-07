@@ -1,6 +1,6 @@
 {
   "name": "any2wechat",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "任意项目，一条 HTTP 请求，直达个人微信。/ A push bridge: any HTTP project → your personal WeChat.",
   "type": "module",
   "main": "src/main.mjs",

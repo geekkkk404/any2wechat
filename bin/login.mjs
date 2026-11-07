@@ -48,6 +48,7 @@ async function main() {
   console.log("=== any2wechat — 登录 ===");
   let qr = await getBotQrcode(baseUrl);
   await renderQr(qr);
+  let qrStartTs = Date.now();
 
   while (Date.now() < deadline) {
     let status;
@@ -61,11 +62,15 @@ async function main() {
 
     switch (status.status) {
       case "wait":
-        process.stdout.write(".");
+        // P-62 v0.4.5：状态行原地刷新（\r 覆盖同一行）——旧版每秒打一个点会持续追加新行，
+        // 把 40+ 行的大码顶出视口（站主实测：码显示后几十秒内"消失"）。码必须静止在屏上等扫。
+        process.stdout.write(
+          `\r\x1b[K⏳ 等待扫码中… ${Math.floor((Date.now() - qrStartTs) / 1000)}s（二维码在上方，需看到完整码可滚动/最大化窗口）`,
+        );
         break;
       case "scaned":
         if (!scannedPrinted) {
-          console.log("\n已扫码，正在验证（手机上如有数字配对码请留意）...");
+          process.stdout.write("\r\x1b[K已扫码，正在验证（手机上如有数字配对码请留意）...\n");
           scannedPrinted = true;
         }
         break;
@@ -84,11 +89,14 @@ async function main() {
         console.log("\n⛔ 多次输入错误，刷新二维码重来");
         verifyCode = undefined;
         qr = await refresh(qr, ++qrRefresh);
+        if (!qr) return die("二维码多次失效，已停止");
+        qrStartTs = Date.now();
         scannedPrinted = false;
         break;
       case "expired":
         qr = await refresh(qr, ++qrRefresh);
         if (!qr) return die("二维码多次失效，已停止");
+        qrStartTs = Date.now();
         scannedPrinted = false;
         break;
       case "scaned_but_redirect":
@@ -159,6 +167,7 @@ async function refresh(oldQr, count) {
   if (count > MAX_QR_REFRESH) return null;
   console.log(`\n⏳ 二维码已过期，刷新中（第 ${count} 次）...`);
   const qr = await getBotQrcode(FIXED_BASE_URL);
+  process.stdout.write("\x1b[2J\x1b[H"); // 清屏重画：旧码不出叠影（过期重绘是唯一重入路径）
   await renderQr(qr);
   return qr;
 }
