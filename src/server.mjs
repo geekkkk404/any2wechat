@@ -1,15 +1,17 @@
-// server.mjs — webhook 服务：POST /webhook {title?, content?|text, qr_content?} → 分批 → 微信；GET /health
+// server.mjs — webhook 服务：POST /webhook {title?, content?|text, qr_content?, images?} → 分批 → 微信；GET /health
 // 完整契约见 docs/webhook-api.md。批字符数默认 1800（保守值，实测后调），BRIDGE_BATCH_CHARS 可调；
 // 批间隔 1.2s、串行发送（防风控）。qr_content（P-53）：非空则发完文本后追加一张二维码图片消息。
+// images（P-61）：base64 PNG 数组，发完文本/QR 后逐张追加——通用发图能力，R5「任意项目→微信」延伸。
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { sendMessage, sendQrContent } from "./ilink.mjs";
+import { sendMessage, sendQrContent, sendImageB64 } from "./ilink.mjs";
 import { DATA_DIR, hasSession, loadCredentials, loadSession } from "./store.mjs";
 
 const BATCH_CHARS = Math.max(500, Math.min(4500, Number(process.env.BRIDGE_BATCH_CHARS || 1800)));
 const BATCH_GAP_MS = 1200; // 批间隔，防风控
-const MAX_BODY_BYTES = 2_000_000; // 请求体上限
+const MAX_IMAGES = 4; // 单次请求图片上限
+const MAX_BODY_BYTES = 8_000_000; // 请求体上限（images 走 base64，1.33x 膨胀，给足余量）
 
 // 推送尾注（通用能力，N-08）：BRIDGE_FOOTER_TEXT 可选；BRIDGE_FOOTER_ONCE_PER_DAY=1 时
 // 每日仅首推带（本地日期判定）。状态存 data/footer-state.json，发送成功才记账——失败不吞明天的名额。
@@ -88,18 +90,24 @@ export function startServer({
         if (body.length > MAX_BODY_BYTES) req.destroy(); // 上限保护
       });
       req.on("end", () => {
-        let title = "", content = "", qrContent = "";
+        let title = "", content = "", qrContent = "", images = [];
         try {
           const j = JSON.parse(body);
           title = String(j.title ?? "");
           content = String(j.content ?? j.text ?? "");
           qrContent = String(j.qr_content ?? "").trim();
+          if (Array.isArray(j.images)) {
+            images = j.images
+              .filter((x) => typeof x === "string" && x.trim())
+              .map((x) => x.trim())
+              .slice(0, MAX_IMAGES);
+          }
         } catch {
           // 兼容纯文本 body
           content = body;
         }
         const full = title ? `${title}\n\n${content}` : content;
-        if (!full.trim() && !qrContent) {
+        if (!full.trim() && !qrContent && !images.length) {
           res.writeHead(400).end(JSON.stringify({ ok: false, error: "empty body" }));
           return;
         }
@@ -133,7 +141,7 @@ export function startServer({
         const batches = fullOut.trim() ? splitBatches(fullOut) : [];
         const seqTag = batches.length > 1;
         stats.received++;
-        log.log(`\n[${new Date().toISOString()}] 收到推送 ${fullOut.length} 字符 → ${batches.length} 批${qrContent ? ` + QR(${qrContent.length}字符)` : ""}`);
+        log.log(`\n[${new Date().toISOString()}] 收到推送 ${fullOut.length} 字符 → ${batches.length} 批${qrContent ? ` + QR(${qrContent.length}字符)` : ""}${images.length ? ` + 图x${images.length}` : ""}`);
 
         sending = sending.then(async () => {
           for (let i = 0; i < batches.length; i++) {
@@ -170,8 +178,20 @@ export function startServer({
               log.error(`  QR 图片 ❌ ${err.message}`);
             }
           }
+          for (let k = 0; k < images.length; k++) {
+            await new Promise((r) => setTimeout(r, BATCH_GAP_MS));
+            try {
+              const s = loadSession();
+              await sendImageB64(creds, s.to_user_id, s.context_token, images[k], log);
+              stats.batches++;
+              stats.lastAt = new Date().toISOString();
+            } catch (err) {
+              stats.failed++;
+              log.error(`  图 ${k + 1}/${images.length} ❌ ${err.message}`);
+            }
+          }
         });
-        res.writeHead(202).end(JSON.stringify({ ok: true, batches: batches.length, qr: Boolean(qrContent) }));
+        res.writeHead(202).end(JSON.stringify({ ok: true, batches: batches.length, qr: Boolean(qrContent), images: images.length }));
         return;
       });
       return;

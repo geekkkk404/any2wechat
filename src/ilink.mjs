@@ -275,6 +275,33 @@ export async function sendQrContent(creds, toUserId, contextToken, content, log 
     margin: 2,
     errorCorrectionLevel: "M",
   });
+  const r = await sendImageBuffer(creds, toUserId, contextToken, png);
+  log.log(`  QR 图片已发送 (${png.length} 字节 PNG, 内容 ${content.length} 字符)`);
+  return r;
+}
+
+/** base64 → PNG Buffer，含魔数校验（防把垃圾字节送上 CDN）。非法抛错。 */
+export function pngFromB64(b64) {
+  const buf = Buffer.from(String(b64), "base64");
+  if (buf.length < 8 || buf[0] !== 0x89 || buf.toString("latin1", 1, 4) !== "PNG") {
+    throw new Error("不是 PNG 数据（魔数校验失败）");
+  }
+  if (buf.length > 5 * 1024 * 1024) throw new Error("图片超过 5MB 上限");
+  return buf;
+}
+
+/**
+ * 发送一张原始 PNG 图片消息（server 契约 images 字段的执行端，P-61 海报卡）。
+ * 与 sendQrContent 共用同一条 CDN 上传链路；失败抛错由调用方决定是否软失败。
+ */
+export async function sendImageB64(creds, toUserId, contextToken, b64, log = console) {
+  const png = pngFromB64(b64);
+  const r = await sendImageBuffer(creds, toUserId, contextToken, png);
+  log.log(`  图片已发送 (${png.length} 字节 PNG)`);
+  return r;
+}
+
+async function sendImageBuffer(creds, toUserId, contextToken, png) {
   const filekey = crypto.randomBytes(16).toString("hex");
   const aeskey = crypto.randomBytes(16);
   const rawfilemd5 = crypto.createHash("md5").update(png).digest("hex");
@@ -295,6 +322,5 @@ export async function sendQrContent(creds, toUserId, contextToken, content, log 
     aeskeyB64: Buffer.from(aeskey.toString("hex")).toString("base64"),
     ciphertextSize: aesEcbPaddedSize(png.length),
   });
-  log.log(`  QR 图片已发送 (${png.length} 字节 PNG, 内容 ${content.length} 字符)`);
   return { fileSize: png.length };
 }

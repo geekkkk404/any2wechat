@@ -1,6 +1,6 @@
 {
   "name": "any2wechat",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "任意项目，一条 HTTP 请求，直达个人微信。/ A push bridge: any HTTP project → your personal WeChat.",
   "type": "module",
   "main": "src/main.mjs",
@@ -15,7 +15,7 @@
     "start": "node src/main.mjs",
     "login": "node bin/login.mjs",
     "send-test": "node bin/send-test.mjs",
-    "test": "node --test test/relay.test.mjs"
+    "test": "node --test test/relay.test.mjs test/images.test.mjs"
   },
   "engines": {
     "node": ">=22.13"
