@@ -1,6 +1,7 @@
 // login.mjs — 登录 CLI：终端出二维码/授权链接 → 轮询状态机 → 凭证落盘 data/credentials.json
 // 状态机语义参考 Tencent/openclaw-weixin src/auth/login-qr.ts（MIT）
-// 零硬依赖：装了 qrcode-terminal 就渲染终端二维码，没装则直接给链接（手机微信内打开即可确认）
+// 零硬依赖：装了 qrcode（P-62：runtime 依赖本就必有——发图链用）就渲染终端二维码（微信扫一扫
+// 对屏幕直接授权，省「复制链接→传手机」三步）；裸跑未 npm install 则直接给链接兜底
 import fs from "node:fs";
 import { FIXED_BASE_URL, getBotQrcode, pollQrStatus } from "../src/ilink.mjs";
 import { QR_LINK_FILE, ensureDataDir, saveCredentials } from "../src/store.mjs";
@@ -11,9 +12,9 @@ const TOTAL_TIMEOUT_MS = 8 * 60_000;
 const codeArgIdx = process.argv.indexOf("--code");
 const PRESET_CODE = codeArgIdx > -1 ? process.argv[codeArgIdx + 1] : undefined;
 
-let QRCodeTerminal = null;
+let QRCodeLib = null;
 try {
-  QRCodeTerminal = (await import("qrcode-terminal")).default;
+  QRCodeLib = (await import("qrcode")).default;
 } catch {
   /* 未安装则跳过终端二维码渲染 */
 }
@@ -45,7 +46,7 @@ async function main() {
 
   console.log("=== any2wechat — 登录 ===");
   let qr = await getBotQrcode(baseUrl);
-  renderQr(qr);
+  await renderQr(qr);
 
   while (Date.now() < deadline) {
     let status;
@@ -121,16 +122,22 @@ async function main() {
   die("登录超时");
 }
 
-function renderQr(qr) {
+async function renderQr(qr) {
   const link = qr.qrcode_img_content || qr.qrcode;
   fs.writeFileSync(QR_LINK_FILE, link, "utf-8"); // 持久化当前有效链接，供后台/远程模式传递
-  console.log("\n手机微信内打开此链接即可确认（也可用微信扫终端二维码）:\n");
-  if (QRCodeTerminal) {
+  let rendered = false;
+  if (QRCodeLib) {
     try {
-      QRCodeTerminal.generate(link, { small: true });
+      const art = await QRCodeLib.toString(link, { type: "terminal", small: true });
+      console.log("\n手机微信「扫一扫」扫下方二维码即可确认（或把链接发到手机，微信内打开）:\n");
+      console.log(art);
+      rendered = true;
     } catch {
-      console.log("(终端二维码渲染失败，用上方链接)");
+      /* 渲染失败回退纯链接 */
     }
+  }
+  if (!rendered) {
+    console.log("\n手机微信内打开此链接即可确认（把链接发到手机，如文件传输助手）:\n");
   }
   console.log(`${link}\n`);
 }
@@ -139,7 +146,7 @@ async function refresh(oldQr, count) {
   if (count > MAX_QR_REFRESH) return null;
   console.log(`\n⏳ 二维码已过期，刷新中（第 ${count} 次）...`);
   const qr = await getBotQrcode(FIXED_BASE_URL);
-  renderQr(qr);
+  await renderQr(qr);
   return qr;
 }
 
