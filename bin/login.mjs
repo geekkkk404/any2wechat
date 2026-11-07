@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import { FIXED_BASE_URL, getBotQrcode, pollQrStatus } from "../src/ilink.mjs";
 import { QR_LINK_FILE, ensureDataDir, saveCredentials } from "../src/store.mjs";
+import { bgSquareArt } from "../src/qrart.mjs";
 
 const MAX_QR_REFRESH = 5;
 const TOTAL_TIMEOUT_MS = 8 * 60_000;
@@ -125,20 +126,32 @@ async function main() {
 async function renderQr(qr) {
   const link = qr.qrcode_img_content || qr.qrcode;
   fs.writeFileSync(QR_LINK_FILE, link, "utf-8"); // 持久化当前有效链接，供后台/远程模式传递
-  let rendered = false;
   if (QRCodeLib) {
+    // 主形态：底色空格方块法（字体无关，P-62 v0.4.4）——终端宽度不足时回退半块紧凑形态
+    let art = null;
     try {
-      const art = await QRCodeLib.toString(link, { type: "terminal", small: true });
+      const { modules } = QRCodeLib.create(link, { errorCorrectionLevel: "L" });
+      art = bgSquareArt(modules, { cols: process.stdout.columns ?? null });
+    } catch {
+      art = null;
+    }
+    if (art) {
       console.log("\n手机微信「扫一扫」扫下方二维码即可确认（或把链接发到手机，微信内打开）:\n");
       console.log(art);
-      rendered = true;
+      console.log(`${link}\n`);
+      return;
+    }
+    try {
+      const smallArt = await QRCodeLib.toString(link, { type: "terminal", small: true });
+      console.log("\n终端较窄，二维码为压缩形态（部分字体下可能变形扫不出）——扫不出就把下方链接发到手机，微信内打开:\n");
+      console.log(smallArt);
+      console.log(`${link}\n`);
+      return;
     } catch {
-      /* 渲染失败回退纯链接 */
+      /* 落到纯链接 */
     }
   }
-  if (!rendered) {
-    console.log("\n手机微信内打开此链接即可确认（把链接发到手机，如文件传输助手）:\n");
-  }
+  console.log("\n手机微信内打开此链接即可确认（把链接发到手机，如文件传输助手）:\n");
   console.log(`${link}\n`);
 }
 
