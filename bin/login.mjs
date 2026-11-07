@@ -47,7 +47,7 @@ async function main() {
 
   console.log("=== any2wechat — 登录 ===");
   let qr = await getBotQrcode(baseUrl);
-  await renderQr(qr);
+  await renderAndArm(qr);
   let qrStartTs = Date.now();
 
   while (Date.now() < deadline) {
@@ -168,8 +168,31 @@ async function refresh(oldQr, count) {
   console.log(`\n⏳ 二维码已过期，刷新中（第 ${count} 次）...`);
   const qr = await getBotQrcode(FIXED_BASE_URL);
   process.stdout.write("\x1b[2J\x1b[H"); // 清屏重画：旧码不出叠影（过期重绘是唯一重入路径）
-  await renderQr(qr);
+  await renderAndArm(qr);
   return qr;
+}
+
+// —— resize 自愈重绘（P-62 v0.4.6）——
+// conhost（传统 CMD）在窗口 resize 时对缓冲做折行重排并丢失 VT 底色属性 → 底色空格画的大码
+// 整片变回黑底=「消失」（站主最大化窗口实测；Windows Terminal 无此问题）。应用层对齐 TUI 惯例：
+// 监听终端 resize 事件（node tty 原生），防抖 200ms 后清屏重绘当前码——最大化/还原都会自动恢复。
+let currentRedraw = null;
+let resizeArmed = false;
+let resizeTimer = null;
+
+async function renderAndArm(qr) {
+  await renderQr(qr);
+  currentRedraw = () => {
+    process.stdout.write("\x1b[2J\x1b[H");
+    renderQr(qr);
+  };
+  if (process.stdout.isTTY && !resizeArmed) {
+    resizeArmed = true;
+    process.stdout.on("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => currentRedraw && currentRedraw(), 200);
+    });
+  }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
