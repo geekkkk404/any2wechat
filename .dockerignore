@@ -1,0 +1,11 @@
+# 构建上下文瘦身 + 安全：凭证（data/）与内部文件不进 build context/daemon（安全模型：凭证勿随镜像打包）
+node_modules
+data
+docker/data
+.git
+test
+docs
+presets
+scripts
+*.md
+LICENSE
